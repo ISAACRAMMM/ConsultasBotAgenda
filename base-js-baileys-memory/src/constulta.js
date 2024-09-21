@@ -1,62 +1,51 @@
+import fetch from 'node-fetch'; // Para realizar peticiones HTTP
+import { createObjectCsvWriter } from 'csv-writer'; // Para escribir archivos CSV
 import { promises as fs } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import xlsx from 'xlsx';
 
-const __filename = fileURLToPath(import.meta.url);
-const _dirname = path.dirname(_filename);
-const filePath = path.resolve(__dirname, './data/pedidos.json');
-const excelFilePath = path.resolve(__dirname, '../data/pedidos.xlsx');
+// Función para convertir datos a CSV y guardarlos
+async function guardarPedidosComoCSV(rutas) {
+    const fechaActual = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+    const nombreArchivo = `${fechaActual}_${rutas.join('_')}.csv`; // Generar el nombre del archivo usando la fecha y las rutas
+    const filePath = path.join(__dirname, './data', nombreArchivo); // Ruta al archivo
 
-export async function agregarPedido(fecha, NombreCliente, pedido) {
     try {
-        // Validar entradas
-        if (!fecha || !NombreCliente || !pedido || !Array.isArray(pedido.productos)) {
-            throw new Error('Entrada no Valida: fecha, NombreCliente, y pedido.productos requeridos.');
+        // 1. Hacer la petición a la API
+        const response = await fetch(`http://localhost:3000/get?rutas=${rutas.join(',')}`);
+        const pedidos = await response.json(); // Obtener los pedidos como JSON
+
+        // 2. Validar si hay pedidos
+        if (!Array.isArray(pedidos) || pedidos.length === 0) {
+            throw new Error('No se encontraron pedidos con las rutas proporcionadas.');
         }
 
-        let data = [];
-        try {
-            const jsonData = await fs.readFile(filePath, 'utf-8');
-            data = jsonData ? JSON.parse(jsonData) : [];
-            if (!Array.isArray(data)) {
-                throw new Error('no es un array');
-            }
-        } catch (err) {
-            if (err.code !== 'ENOENT') {
-                console.error('Error de lectura de archivo:', err);
-                throw err;
-            }
-            // El archivo no fue encontrado, inicializar un arreglo vacío
-        }
+        // 3. Definir el encabezado para el archivo CSV
+        const csvWriter = createObjectCsvWriter({
+            path: filePath,
+            header: [
+                { id: 'ruta', title: 'Ruta' },
+                { id: 'fecha', title: 'Fecha' },
+                { id: 'nombreCliente', title: 'Cliente' },
+                { id: 'productos', title: 'Productos' }
+            ]
+        });
 
-        const newPedido = {
-            fecha,
-            NombreCliente,
-            pedido: pedido.productos,
-        };
+        // 4. Preparar los datos en formato adecuado para CSV
+        const registrosCSV = pedidos.map(pedido => ({
+            ruta: pedido.ruta,
+            fecha: pedido.fecha,
+            nombreCliente: pedido.nombreCliente,
+            productos: pedido.productos.join(', ') // Convertir el array de productos en una cadena
+        }));
 
-        data.push(newPedido);
-        await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
-        console.log('Pedido agregado con éxito');
+        // 5. Escribir el archivo CSV
+        await csvWriter.writeRecords(registrosCSV);
 
-        // Generar archivo Excel
-        await generarExcel(data);
+        console.log(`Archivo CSV guardado exitosamente en ${filePath}`);
     } catch (error) {
-        console.error('Error al agregar pedido:', error.message);
+        console.error('Error al guardar los pedidos como CSV:', error.message);
     }
 }
 
-async function generarExcel(data) {
-    try {
-        const worksheet = xlsx.utils.json_to_sheet(data);
-        const workbook = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(workbook, worksheet, 'Pedidos');
-
-        // Escribir el archivo Excel
-        await fs.writeFile(excelFilePath, xlsx.write(workbook, { bookType: 'xlsx', type: 'buffer' }));
-        console.log('Archivo Excel generado con éxito');
-    } catch (error) {
-        console.error('Error al generar archivo Excel:', error.message);
-    }
-}
+// Ejemplo de uso: solicitar los pedidos para las rutas "pedido1" y "pedido2"
+guardarPedidosComoCSV(['pedido1', 'pedido2']);
